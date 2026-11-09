@@ -18,7 +18,7 @@ public class Main {
                   O – otočit orientaci ořezávacího polygonu (CW/CCW)
                   Y – zapnout / vypnout ořezání úseček (Cohen–Sutherland)
                   Enter – uložit n-úhelník a začít nový
-                  C – smazat plátno a všechna data
+                  C – smazat plátno, reset stavů a všech datových struktur
                   LMB – úsečka / vrchol / v režimu F kreslení hranice
                   Shift+LMB (úsečka) – vodorovná / svislá / úhlopříčná (45°)
                   RMB – přesun vrcholu (P) / semínko výplně (F)

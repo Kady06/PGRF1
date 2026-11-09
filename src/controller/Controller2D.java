@@ -55,7 +55,7 @@ public class Controller2D {
     /** Aktuálně rozpracovaný n-úhelník. */
     private Polygon polygon = new Polygon();
     /** Fixní konvexní ořezávací polygon (≥ 5 vrcholů). */
-    private final Polygon clipPolygon;
+    private Polygon clipPolygon;
     private boolean clippingEnabled;
     /** Obdélníkové ořezávací okno pro Cohen–Sutherland. */
     private final ClipRect clipRect;
@@ -564,17 +564,37 @@ public class Controller2D {
         editedVertexIndex = -1;
     }
 
+    /**
+     * Klávesa C: vymaže plátno, všechna data a resetuje stavy aplikace.
+     */
     private void clearAll() {
+        // Datové struktury
         lines.clear();
         polygons.clear();
         polygonsScanFilled.clear();
         polygon = new Polygon();
-        scanLineFillActive = false;
+
+        // Interakční stavy
         cancelInteraction();
+        cursorPoint = null;
+
+        // Režimy a přepínače
+        mode = Mode.LINE;
+        fillCondition = SeedFiller.Condition.BACKGROUND;
+        scanLineFillActive = false;
+        clippingEnabled = false;
+        lineClippingEnabled = false;
+        clipPolygon = createConvexClipPolygon(
+                panel.getRaster().getWidth(),
+                panel.getRaster().getHeight(),
+                CLIP_POLYGON_VERTICES
+        );
+
+        // Rastrové vrstvy
         paintLayer.clear();
         panel.getRaster().clear();
-        panel.repaint();
-        System.out.println("Plátno a datové struktury vymazány (C)");
+        redraw();
+        System.out.println("Plátno, stavy a datové struktury resetovány (C)");
     }
 
     private void redraw() {
