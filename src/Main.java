@@ -11,10 +11,12 @@ public class Main {
                 Ovládání:
                   L – režim úsečky (výchozí)
                   P – režim n-úhelníku
+                  F – režim semínkového vyplnění
+                  T – přepínač podmínky výplně (barva pozadí / barva hranice)
                   C – smazat plátno a všechna data
-                  LMB – úsečka / přidání vrcholu (od 2 bodů do nejbližší hrany)
+                  LMB – úsečka / vrchol / v režimu F kreslení hranice
                   Shift+LMB (úsečka) – vodorovná / svislá / úhlopříčná (45°)
-                  RMB – uchopit nejbližší vrchol a tažením přesunout
+                  RMB – přesun vrcholu (P) / semínko výplně (F)
                 """);
     }
 }

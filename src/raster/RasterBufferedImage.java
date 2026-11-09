@@ -53,4 +53,39 @@ public class RasterBufferedImage implements Raster {
     public BufferedImage getImage() {
         return image;
     }
+
+    /** Zkopíruje do cíle pixely, které nejsou barvou pozadí. */
+    public void copyNonBackgroundTo(Raster dest, int backgroundColor) {
+        int bg = backgroundColor & 0xFFFFFF;
+        int w = getWidth();
+        int h = getHeight();
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int color = image.getRGB(x, y) & 0xFFFFFF;
+                if (color != bg) {
+                    dest.setPixel(x, y, color);
+                }
+            }
+        }
+    }
+
+    public void copyFrom(RasterBufferedImage src) {
+        Graphics g = image.getGraphics();
+        g.drawImage(src.getImage(), 0, 0, null);
+        g.dispose();
+    }
+
+    /** Zkopíruje do cíle jen pixely dané barvy. */
+    public void copyColorTo(Raster dest, int color) {
+        int wanted = color & 0xFFFFFF;
+        int w = getWidth();
+        int h = getHeight();
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                if ((image.getRGB(x, y) & 0xFFFFFF) == wanted) {
+                    dest.setPixel(x, y, wanted);
+                }
+            }
+        }
+    }
 }
