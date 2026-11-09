@@ -48,6 +48,32 @@ public class Polygon {
     }
 
     /**
+     * Even-odd test: leží bod uvnitř n-úhelníku?
+     */
+    public boolean contains(int x, int y) {
+        if (points.size() < 3) {
+            return false;
+        }
+
+        boolean inside = false;
+        int size = points.size();
+        for (int i = 0, j = size - 1; i < size; j = i++) {
+            Point pi = points.get(i);
+            Point pj = points.get(j);
+            int yi = pi.getY();
+            int yj = pj.getY();
+            if ((yi > y) == (yj > y)) {
+                continue;
+            }
+            double xIntersect = (pj.getX() - pi.getX()) * (y - yi) / (double) (yj - yi) + pi.getX();
+            if (x < xIntersect) {
+                inside = !inside;
+            }
+        }
+        return inside;
+    }
+
+    /**
      * Index nejbližšího vrcholu k [x, y], nebo -1 pokud je vzdálenost větší než maxDistance.
      */
     public int findNearestVertex(int x, int y, double maxDistance) {

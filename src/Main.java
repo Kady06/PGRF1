@@ -13,6 +13,8 @@ public class Main {
                   P – režim n-úhelníku
                   F – režim semínkového vyplnění
                   T – přepínač podmínky výplně (barva pozadí / barva hranice)
+                  S – scan-line vyplnění n-úhelníku pod kurzorem
+                  Enter – uložit n-úhelník a začít nový
                   C – smazat plátno a všechna data
                   LMB – úsečka / vrchol / v režimu F kreslení hranice
                   Shift+LMB (úsečka) – vodorovná / svislá / úhlopříčná (45°)

@@ -7,6 +7,7 @@ import raster.RasterBufferedImage;
 import rasterize.LineRasterizer;
 import rasterize.LineRasterizerTrivial;
 import rasterize.PolygonRasterizer;
+import rasterize.ScanLineFiller;
 import rasterize.SeedFiller;
 import view.Panel;
 
@@ -24,6 +25,7 @@ public class Controller2D {
     private static final int COLOR_PREVIEW = 0xffffff;
     private static final int COLOR_BOUNDARY = 0xff0000;
     private static final int COLOR_FILL = 0x0088ff;
+    private static final int COLOR_SCAN_FILL = 0xff6600;
     private static final int COLOR_BACKGROUND = 0x000000;
     private static final double VERTEX_PICK_RADIUS = 12.0;
 
@@ -35,14 +37,21 @@ public class Controller2D {
     private final LineRasterizer lineRasterizer;
     private final LineRasterizer boundaryRasterizer;
     private final PolygonRasterizer polygonRasterizer;
+    private final ScanLineFiller scanLineFiller;
     /** Trvalá vrstva hranic a výplní – nepřebíjí ji překreslení úseček/n-úhelníku. */
     private final RasterBufferedImage paintLayer;
 
     private final List<Line> lines = new ArrayList<>();
+    /** Dokončené n-úhelníky (uložené přes Enter). */
+    private final List<Polygon> polygons = new ArrayList<>();
+    /** Indexy dokončených n-úhelníků se scan-line výplní. */
+    private final List<Boolean> polygonsScanFilled = new ArrayList<>();
+    /** Aktuálně rozpracovaný n-úhelník. */
     private Polygon polygon = new Polygon();
 
     private Mode mode = Mode.LINE;
     private SeedFiller.Condition fillCondition = SeedFiller.Condition.BACKGROUND;
+    private boolean scanLineFillActive;
 
     private boolean drawing;
     private Point startPoint;
@@ -57,12 +66,16 @@ public class Controller2D {
     private boolean drawingBoundary;
     private Point lastBoundaryPoint;
 
+    /** Poslední známá pozice kurzoru na plátně (pro scan-line pod kurzorem). */
+    private Point cursorPoint;
+
     public Controller2D(Panel panel) {
         this.panel = panel;
         this.paintLayer = new RasterBufferedImage(panel.getRaster().getWidth(), panel.getRaster().getHeight());
         this.lineRasterizer = new LineRasterizerTrivial(panel.getRaster());
         this.boundaryRasterizer = new LineRasterizerTrivial(paintLayer);
         this.polygonRasterizer = new PolygonRasterizer(lineRasterizer);
+        this.scanLineFiller = new ScanLineFiller(lineRasterizer);
         initListeners();
         redraw();
     }
@@ -71,11 +84,12 @@ public class Controller2D {
         panel.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
+                cursorPoint = clampToCanvas(e);
                 if (mode == Mode.FILL) {
                     handleFillMousePressed(e);
                     return;
                 }
-                Point mouse = clampToCanvas(e);
+                Point mouse = cursorPoint;
                 if (e.getButton() == MouseEvent.BUTTON3) {
                     startVertexEdit(mouse.getX(), mouse.getY());
                     return;
@@ -128,12 +142,18 @@ public class Controller2D {
 
         panel.addMouseMotionListener(new MouseAdapter() {
             @Override
+            public void mouseMoved(MouseEvent e) {
+                cursorPoint = clampToCanvas(e);
+            }
+
+            @Override
             public void mouseDragged(MouseEvent e) {
+                cursorPoint = clampToCanvas(e);
                 if (mode == Mode.FILL) {
                     handleFillMouseDragged(e);
                     return;
                 }
-                Point mouse = clampToCanvas(e);
+                Point mouse = cursorPoint;
                 if (editingVertex && editedVertexIndex >= 0) {
                     polygon.getPoint(editedVertexIndex).set(mouse.getX(), mouse.getY());
                     redraw();
@@ -175,6 +195,12 @@ public class Controller2D {
                     }
                     case KeyEvent.VK_T -> {
                         toggleFillCondition();
+                    }
+                    case KeyEvent.VK_S -> {
+                        applyScanLineFill();
+                    }
+                    case KeyEvent.VK_ENTER -> {
+                        finalizePolygon();
                     }
                     case KeyEvent.VK_SHIFT -> refreshLinePreview(true);
                     default -> {
@@ -272,11 +298,23 @@ public class Controller2D {
             stampLines.rasterize(line.getX1(), line.getY1(), line.getX2(), line.getY2(), lineColor);
         }
 
-        if (polygon.getSize() >= 2) {
-            stampPolygon.rasterize(polygon, polygonColor);
-        } else if (polygon.getSize() == 1) {
-            Point p = polygon.getFirst();
-            target.setPixel(p.getX(), p.getY(), polygonColor);
+        for (Polygon finished : polygons) {
+            stampPolygonShape(stampPolygon, target, finished, polygonColor);
+        }
+        stampPolygonShape(stampPolygon, target, polygon, polygonColor);
+    }
+
+    private void stampPolygonShape(
+            PolygonRasterizer stampPolygon,
+            RasterBufferedImage target,
+            Polygon shape,
+            int color
+    ) {
+        if (shape.getSize() >= 2) {
+            stampPolygon.rasterize(shape, color);
+        } else if (shape.getSize() == 1) {
+            Point p = shape.getFirst();
+            target.setPixel(p.getX(), p.getY(), color);
         }
     }
 
@@ -285,6 +323,63 @@ public class Controller2D {
                 ? SeedFiller.Condition.BOUNDARY
                 : SeedFiller.Condition.BACKGROUND;
         System.out.println("Podmínka vyplnění: " + fillConditionLabel());
+    }
+
+    private void applyScanLineFill() {
+        Point cursor = cursorPoint;
+        if (cursor == null) {
+            java.awt.Point mouse = panel.getMousePosition();
+            if (mouse != null) {
+                cursor = clampToCanvas(mouse.x, mouse.y);
+            }
+        }
+        if (cursor == null) {
+            System.out.println("Scan-line: kurzor není nad plátnem");
+            return;
+        }
+
+        int x = cursor.getX();
+        int y = cursor.getY();
+
+        // Od shora (aktuální / naposledy uložený) – vyplní n-úhelník pod kurzorem.
+        if (polygon.getSize() >= 3 && polygon.contains(x, y)) {
+            scanLineFillActive = true;
+            redraw();
+            System.out.println("Scan-line: vyplněn aktuální n-úhelník pod kurzorem");
+            return;
+        }
+
+        for (int i = polygons.size() - 1; i >= 0; i--) {
+            Polygon candidate = polygons.get(i);
+            if (candidate.getSize() >= 3 && candidate.contains(x, y)) {
+                polygonsScanFilled.set(i, true);
+                redraw();
+                System.out.println("Scan-line: vyplněn n-úhelník #" + (i + 1) + " pod kurzorem");
+                return;
+            }
+        }
+
+        System.out.println("Scan-line: pod kurzorem není žádný n-úhelník");
+    }
+
+    /** Uloží aktuální n-úhelník a začne kreslit nový. */
+    private void finalizePolygon() {
+        if (mode != Mode.POLYGON) {
+            mode = Mode.POLYGON;
+        }
+        cancelInteraction();
+
+        if (polygon.getSize() < 3) {
+            System.out.println("Enter: n-úhelník musí mít alespoň 3 vrcholy");
+            return;
+        }
+
+        polygons.add(polygon);
+        polygonsScanFilled.add(scanLineFillActive);
+        polygon = new Polygon();
+        scanLineFillActive = false;
+        redraw();
+        System.out.println("N-úhelník uložen (Enter), můžete kreslit nový");
     }
 
     private String fillConditionLabel() {
@@ -417,7 +512,10 @@ public class Controller2D {
 
     private void clearAll() {
         lines.clear();
+        polygons.clear();
+        polygonsScanFilled.clear();
         polygon = new Polygon();
+        scanLineFillActive = false;
         cancelInteraction();
         paintLayer.clear();
         panel.getRaster().clear();
@@ -436,14 +534,41 @@ public class Controller2D {
         for (Line line : lines) {
             lineRasterizer.rasterize(line);
         }
-        if (polygon.getSize() >= 2) {
-            polygonRasterizer.rasterize(polygon, COLOR_POLYGON);
-        } else if (polygon.getSize() == 1) {
-            Point p = polygon.getFirst();
-            panel.getRaster().setPixel(p.getX(), p.getY(), COLOR_POLYGON);
+        for (int i = 0; i < polygons.size(); i++) {
+            List<Polygon> occluders = occludersAbove(i);
+            drawPolygon(
+                    polygons.get(i),
+                    Boolean.TRUE.equals(polygonsScanFilled.get(i)),
+                    occluders
+            );
         }
+        drawPolygon(polygon, scanLineFillActive, List.of());
         // Hranice + výplně z trvalé vrstvy (přežijí dokreslování i změnu režimu).
         paintLayer.copyNonBackgroundTo(panel.getRaster(), COLOR_BACKGROUND);
+    }
+
+    /** N-úhelníky kreslené později (zakrývají výplň nižších). */
+    private List<Polygon> occludersAbove(int finishedIndex) {
+        List<Polygon> occluders = new ArrayList<>();
+        for (int j = finishedIndex + 1; j < polygons.size(); j++) {
+            occluders.add(polygons.get(j));
+        }
+        if (polygon.getSize() >= 3) {
+            occluders.add(polygon);
+        }
+        return occluders;
+    }
+
+    private void drawPolygon(Polygon shape, boolean scanFilled, List<Polygon> occluders) {
+        if (scanFilled && shape.getSize() >= 3) {
+            scanLineFiller.fill(shape, COLOR_SCAN_FILL, occluders);
+        }
+        if (shape.getSize() >= 2) {
+            polygonRasterizer.rasterize(shape, COLOR_POLYGON);
+        } else if (shape.getSize() == 1) {
+            Point p = shape.getFirst();
+            panel.getRaster().setPixel(p.getX(), p.getY(), COLOR_POLYGON);
+        }
     }
 
     private void drawPreview() {
