@@ -1,9 +1,11 @@
 package controller;
 
+import model.ClipRect;
 import model.Line;
 import model.Point;
 import model.Polygon;
 import raster.RasterBufferedImage;
+import rasterize.CohenSutherland;
 import rasterize.LineRasterizer;
 import rasterize.LineRasterizerTrivial;
 import rasterize.PolygonClipper;
@@ -28,6 +30,7 @@ public class Controller2D {
     private static final int COLOR_FILL = 0x0088ff;
     private static final int COLOR_SCAN_FILL = 0xff6600;
     private static final int COLOR_CLIP = 0x00ffff;
+    private static final int COLOR_CLIP_RECT = 0xff00ff;
     private static final int COLOR_BACKGROUND = 0x000000;
     private static final double VERTEX_PICK_RADIUS = 12.0;
     private static final int CLIP_POLYGON_VERTICES = 5;
@@ -54,6 +57,9 @@ public class Controller2D {
     /** Fixní konvexní ořezávací polygon (≥ 5 vrcholů). */
     private final Polygon clipPolygon;
     private boolean clippingEnabled;
+    /** Obdélníkové ořezávací okno pro Cohen–Sutherland. */
+    private final ClipRect clipRect;
+    private boolean lineClippingEnabled;
 
     private Mode mode = Mode.LINE;
     private SeedFiller.Condition fillCondition = SeedFiller.Condition.BACKGROUND;
@@ -82,11 +88,10 @@ public class Controller2D {
         this.boundaryRasterizer = new LineRasterizerTrivial(paintLayer);
         this.polygonRasterizer = new PolygonRasterizer(lineRasterizer);
         this.scanLineFiller = new ScanLineFiller(lineRasterizer);
-        this.clipPolygon = createConvexClipPolygon(
-                panel.getRaster().getWidth(),
-                panel.getRaster().getHeight(),
-                CLIP_POLYGON_VERTICES
-        );
+        int width = panel.getRaster().getWidth();
+        int height = panel.getRaster().getHeight();
+        this.clipPolygon = createConvexClipPolygon(width, height, CLIP_POLYGON_VERTICES);
+        this.clipRect = createClipRect(width, height);
         initListeners();
         redraw();
     }
@@ -104,6 +109,13 @@ public class Controller2D {
             clip.addPoint(new Point(x, y));
         }
         return clip;
+    }
+
+    /** Osově zarovnané obdélníkové okno pro ořezání úseček. */
+    private static ClipRect createClipRect(int width, int height) {
+        int marginX = width / 5;
+        int marginY = height / 5;
+        return new ClipRect(marginX, marginY, width - marginX, height - marginY);
     }
 
     private void initListeners() {
@@ -230,12 +242,18 @@ public class Controller2D {
                     }
                     case KeyEvent.VK_X -> {
                         clippingEnabled = !clippingEnabled;
-                        System.out.println("Ořezání (X): " + (clippingEnabled ? "zapnuto" : "vypnuto"));
+                        System.out.println("Ořezání n-úhelníku (X): " + (clippingEnabled ? "zapnuto" : "vypnuto"));
                         redraw();
                     }
                     case KeyEvent.VK_O -> {
                         PolygonClipper.reverseOrientation(clipPolygon);
                         System.out.println("Orientace ořezávacího polygonu otočena (O)");
+                        redraw();
+                    }
+                    case KeyEvent.VK_Y -> {
+                        lineClippingEnabled = !lineClippingEnabled;
+                        System.out.println("Cohen–Sutherland ořezání úseček (Y): "
+                                + (lineClippingEnabled ? "zapnuto" : "vypnuto"));
                         redraw();
                     }
                     case KeyEvent.VK_SHIFT -> refreshLinePreview(true);
@@ -567,12 +585,13 @@ public class Controller2D {
     }
 
     private void drawScene() {
-        for (Line line : lines) {
-            lineRasterizer.rasterize(line);
-        }
-
+        drawClipRect();
         // Ořezávací polygon (vždy viditelný).
         polygonRasterizer.rasterize(clipPolygon, COLOR_CLIP);
+
+        for (Line line : lines) {
+            drawLine(line);
+        }
 
         for (int i = 0; i < polygons.size(); i++) {
             Polygon subject = displayPolygon(polygons.get(i));
@@ -587,6 +606,24 @@ public class Controller2D {
 
         // Hranice + výplně z trvalé vrstvy (přežijí dokreslování i změnu režimu).
         paintLayer.copyNonBackgroundTo(panel.getRaster(), COLOR_BACKGROUND);
+    }
+
+    private void drawClipRect() {
+        int xMin = clipRect.getXMin();
+        int yMin = clipRect.getYMin();
+        int xMax = clipRect.getXMax();
+        int yMax = clipRect.getYMax();
+        lineRasterizer.rasterize(xMin, yMin, xMax, yMin, COLOR_CLIP_RECT);
+        lineRasterizer.rasterize(xMax, yMin, xMax, yMax, COLOR_CLIP_RECT);
+        lineRasterizer.rasterize(xMax, yMax, xMin, yMax, COLOR_CLIP_RECT);
+        lineRasterizer.rasterize(xMin, yMax, xMin, yMin, COLOR_CLIP_RECT);
+    }
+
+    private void drawLine(Line line) {
+        Line toDraw = lineClippingEnabled ? CohenSutherland.clip(line, clipRect) : line;
+        if (toDraw != null) {
+            lineRasterizer.rasterize(toDraw);
+        }
     }
 
     /** Při zapnutém ořezání vrátí ořezaný tvar, jinak původní. */
@@ -630,11 +667,8 @@ public class Controller2D {
         }
 
         if (mode == Mode.LINE) {
-            lineRasterizer.rasterize(
-                    startPoint.getX(), startPoint.getY(),
-                    previewPoint.getX(), previewPoint.getY(),
-                    COLOR_PREVIEW
-            );
+            Line preview = new Line(startPoint, previewPoint, COLOR_PREVIEW);
+            drawLine(preview);
             return;
         }
 
