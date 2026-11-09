@@ -39,6 +39,8 @@ public class Controller2D {
     private boolean drawing;
     private Point startPoint;
     private Point previewPoint;
+    
+    private Point rawMousePoint;
 
     private int insertEdgeIndex = -1;
 
@@ -68,6 +70,7 @@ public class Controller2D {
 
                 drawing = true;
                 startPoint = new Point(e.getX(), e.getY());
+                rawMousePoint = startPoint;
                 previewPoint = startPoint;
                 updateInsertEdgePreview();
                 redraw();
@@ -86,7 +89,8 @@ public class Controller2D {
                 }
 
                 drawing = false;
-                Point end = new Point(e.getX(), e.getY());
+                rawMousePoint = new Point(e.getX(), e.getY());
+                Point end = resolveEndPoint(rawMousePoint, e.isShiftDown());
 
                 if (mode == Mode.LINE) {
                     lines.add(new Line(startPoint, end, COLOR_LINE));
@@ -96,6 +100,7 @@ public class Controller2D {
 
                 startPoint = null;
                 previewPoint = null;
+                rawMousePoint = null;
                 insertEdgeIndex = -1;
                 redraw();
             }
@@ -112,7 +117,8 @@ public class Controller2D {
                 if (!drawing) {
                     return;
                 }
-                previewPoint = new Point(e.getX(), e.getY());
+                rawMousePoint = new Point(e.getX(), e.getY());
+                previewPoint = resolveEndPoint(rawMousePoint, e.isShiftDown());
                 updateInsertEdgePreview();
                 redraw();
             }
@@ -135,11 +141,63 @@ public class Controller2D {
                         System.out.println("Režim: n-úhelník (P)");
                         redraw();
                     }
+                    case KeyEvent.VK_SHIFT -> refreshLinePreview(true);
                     default -> {
                     }
                 }
             }
+
+            @Override
+            public void keyReleased(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_SHIFT) {
+                    refreshLinePreview(false);
+                }
+            }
         });
+    }
+
+    private Point resolveEndPoint(Point mouse, boolean shiftDown) {
+        if (mode == Mode.LINE && shiftDown && startPoint != null) {
+            return snapAxisAlignedOrDiagonal(startPoint, mouse);
+        }
+        return mouse;
+    }
+
+    private Point snapAxisAlignedOrDiagonal(Point start, Point mouse) {
+        int sx = start.getX();
+        int sy = start.getY();
+        int mx = mouse.getX();
+        int my = mouse.getY();
+
+        Point horizontal = new Point(mx, sy);
+        Point vertical = new Point(sx, my);
+
+        int tPlus = (int) Math.round(((mx - sx) + (my - sy)) / 2.0);
+        Point diagonalPlus = new Point(sx + tPlus, sy + tPlus);
+
+        int tMinus = (int) Math.round(((mx - sx) - (my - sy)) / 2.0);
+        Point diagonalMinus = new Point(sx + tMinus, sy - tMinus);
+
+        Point best = horizontal;
+        double bestDist = mouse.distanceTo(horizontal);
+
+        Point[] candidates = {vertical, diagonalPlus, diagonalMinus};
+        for (Point candidate : candidates) {
+            double dist = mouse.distanceTo(candidate);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private void refreshLinePreview(boolean shiftDown) {
+        if (!drawing || mode != Mode.LINE || startPoint == null || rawMousePoint == null) {
+            return;
+        }
+        previewPoint = resolveEndPoint(rawMousePoint, shiftDown);
+        redraw();
     }
 
     private void startVertexEdit(int x, int y) {
@@ -194,6 +252,7 @@ public class Controller2D {
         drawing = false;
         startPoint = null;
         previewPoint = null;
+        rawMousePoint = null;
         insertEdgeIndex = -1;
     }
 

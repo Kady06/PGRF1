@@ -13,6 +13,7 @@ public class Main {
                   P – režim n-úhelníku
                   C – smazat plátno a všechna data
                   LMB – úsečka / přidání vrcholu (od 2 bodů do nejbližší hrany)
+                  Shift+LMB (úsečka) – vodorovná / svislá / úhlopříčná (45°)
                   RMB – uchopit nejbližší vrchol a tažením přesunout
                 """);
     }
