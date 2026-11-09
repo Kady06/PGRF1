@@ -14,6 +14,8 @@ public class Main {
                   F – režim semínkového vyplnění
                   T – přepínač podmínky výplně (barva pozadí / barva hranice)
                   S – scan-line vyplnění n-úhelníku pod kurzorem
+                  X – zapnout / vypnout ořezání konvexním polygonem
+                  O – otočit orientaci ořezávacího polygonu (CW/CCW)
                   Enter – uložit n-úhelník a začít nový
                   C – smazat plátno a všechna data
                   LMB – úsečka / vrchol / v režimu F kreslení hranice

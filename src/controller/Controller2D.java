@@ -6,6 +6,7 @@ import model.Polygon;
 import raster.RasterBufferedImage;
 import rasterize.LineRasterizer;
 import rasterize.LineRasterizerTrivial;
+import rasterize.PolygonClipper;
 import rasterize.PolygonRasterizer;
 import rasterize.ScanLineFiller;
 import rasterize.SeedFiller;
@@ -26,8 +27,10 @@ public class Controller2D {
     private static final int COLOR_BOUNDARY = 0xff0000;
     private static final int COLOR_FILL = 0x0088ff;
     private static final int COLOR_SCAN_FILL = 0xff6600;
+    private static final int COLOR_CLIP = 0x00ffff;
     private static final int COLOR_BACKGROUND = 0x000000;
     private static final double VERTEX_PICK_RADIUS = 12.0;
+    private static final int CLIP_POLYGON_VERTICES = 5;
 
     private enum Mode {
         LINE, POLYGON, FILL
@@ -48,6 +51,9 @@ public class Controller2D {
     private final List<Boolean> polygonsScanFilled = new ArrayList<>();
     /** Aktuálně rozpracovaný n-úhelník. */
     private Polygon polygon = new Polygon();
+    /** Fixní konvexní ořezávací polygon (≥ 5 vrcholů). */
+    private final Polygon clipPolygon;
+    private boolean clippingEnabled;
 
     private Mode mode = Mode.LINE;
     private SeedFiller.Condition fillCondition = SeedFiller.Condition.BACKGROUND;
@@ -76,8 +82,28 @@ public class Controller2D {
         this.boundaryRasterizer = new LineRasterizerTrivial(paintLayer);
         this.polygonRasterizer = new PolygonRasterizer(lineRasterizer);
         this.scanLineFiller = new ScanLineFiller(lineRasterizer);
+        this.clipPolygon = createConvexClipPolygon(
+                panel.getRaster().getWidth(),
+                panel.getRaster().getHeight(),
+                CLIP_POLYGON_VERTICES
+        );
         initListeners();
         redraw();
+    }
+
+    /** Pravidelný konvexní n-úhelník uprostřed plátna (ořezávací okno). */
+    private static Polygon createConvexClipPolygon(int width, int height, int vertices) {
+        Polygon clip = new Polygon();
+        double cx = width / 2.0;
+        double cy = height / 2.0;
+        double radius = Math.min(width, height) / 3.0;
+        for (int i = 0; i < vertices; i++) {
+            double angle = -Math.PI / 2.0 + i * 2.0 * Math.PI / vertices;
+            int x = (int) Math.round(cx + radius * Math.cos(angle));
+            int y = (int) Math.round(cy + radius * Math.sin(angle));
+            clip.addPoint(new Point(x, y));
+        }
+        return clip;
     }
 
     private void initListeners() {
@@ -201,6 +227,16 @@ public class Controller2D {
                     }
                     case KeyEvent.VK_ENTER -> {
                         finalizePolygon();
+                    }
+                    case KeyEvent.VK_X -> {
+                        clippingEnabled = !clippingEnabled;
+                        System.out.println("Ořezání (X): " + (clippingEnabled ? "zapnuto" : "vypnuto"));
+                        redraw();
+                    }
+                    case KeyEvent.VK_O -> {
+                        PolygonClipper.reverseOrientation(clipPolygon);
+                        System.out.println("Orientace ořezávacího polygonu otočena (O)");
+                        redraw();
                     }
                     case KeyEvent.VK_SHIFT -> refreshLinePreview(true);
                     default -> {
@@ -342,7 +378,7 @@ public class Controller2D {
         int y = cursor.getY();
 
         // Od shora (aktuální / naposledy uložený) – vyplní n-úhelník pod kurzorem.
-        if (polygon.getSize() >= 3 && polygon.contains(x, y)) {
+        if (polygon.getSize() >= 3 && displayPolygon(polygon).contains(x, y)) {
             scanLineFillActive = true;
             redraw();
             System.out.println("Scan-line: vyplněn aktuální n-úhelník pod kurzorem");
@@ -351,7 +387,7 @@ public class Controller2D {
 
         for (int i = polygons.size() - 1; i >= 0; i--) {
             Polygon candidate = polygons.get(i);
-            if (candidate.getSize() >= 3 && candidate.contains(x, y)) {
+            if (candidate.getSize() >= 3 && displayPolygon(candidate).contains(x, y)) {
                 polygonsScanFilled.set(i, true);
                 redraw();
                 System.out.println("Scan-line: vyplněn n-úhelník #" + (i + 1) + " pod kurzorem");
@@ -534,27 +570,41 @@ public class Controller2D {
         for (Line line : lines) {
             lineRasterizer.rasterize(line);
         }
+
+        // Ořezávací polygon (vždy viditelný).
+        polygonRasterizer.rasterize(clipPolygon, COLOR_CLIP);
+
         for (int i = 0; i < polygons.size(); i++) {
+            Polygon subject = displayPolygon(polygons.get(i));
             List<Polygon> occluders = occludersAbove(i);
             drawPolygon(
-                    polygons.get(i),
+                    subject,
                     Boolean.TRUE.equals(polygonsScanFilled.get(i)),
                     occluders
             );
         }
-        drawPolygon(polygon, scanLineFillActive, List.of());
+        drawPolygon(displayPolygon(polygon), scanLineFillActive, List.of());
+
         // Hranice + výplně z trvalé vrstvy (přežijí dokreslování i změnu režimu).
         paintLayer.copyNonBackgroundTo(panel.getRaster(), COLOR_BACKGROUND);
+    }
+
+    /** Při zapnutém ořezání vrátí ořezaný tvar, jinak původní. */
+    private Polygon displayPolygon(Polygon subject) {
+        if (!clippingEnabled || subject.getSize() < 3) {
+            return subject;
+        }
+        return PolygonClipper.clip(subject, clipPolygon);
     }
 
     /** N-úhelníky kreslené později (zakrývají výplň nižších). */
     private List<Polygon> occludersAbove(int finishedIndex) {
         List<Polygon> occluders = new ArrayList<>();
         for (int j = finishedIndex + 1; j < polygons.size(); j++) {
-            occluders.add(polygons.get(j));
+            occluders.add(displayPolygon(polygons.get(j)));
         }
         if (polygon.getSize() >= 3) {
-            occluders.add(polygon);
+            occluders.add(displayPolygon(polygon));
         }
         return occluders;
     }
